@@ -1,14 +1,17 @@
 package main
 
 import (
-	"fmt"
 	"tpcmethod/http"
 )
 
 func main() {
-	r := http.Router{}
-	r.Get("/", func(r1 http.Request, r2 http.Response) {
-		fmt.Printf("Hi")
+	r := http.Router()
+	r.Route("GET", "/", func(req http.Request, res http.Response) {
+		res.SendData("Hi")
+	})
+
+	r.Route("GET", "/ping", func(req http.Request, res http.Response) {
+		res.SendJson("{\"ping\":\"pong\"}")
 	})
 
 	http.Serve(":8080", r)

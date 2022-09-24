@@ -18,36 +18,35 @@ type Request struct {
 }
 
 type Response struct {
-	Method  string
-	Route   string
 	headers map[string]string
-	Host    string
+	connect net.Conn
 }
 
-type handler struct {
-	path    string
-	handler func(Request, Response)
+type handler func(Request, Response)
+
+type key struct {
+	method string
+	path   string
 }
 
-type Router struct {
-	list []handler
+type router_ struct {
+	list map[key]handler
 }
 
-var router Router = Router{}
+func (r router_) Route(method string, path string, hand func(Request, Response)) {
+	method = strings.ToUpper(method)
+	r.list[key{method, path}] = hand
+}
 
-func (r Router) Get(path string, handler func(Request, Response)) {
-
-	if len(r.list) == 0 {
-		// r.list[0] = handler {
-		// 	path   : path,
-		// 	handler :handler,
-		// }
-	} else {
-		r.list[len(r.list)+1] = struct {
-			path    string
-			handler func(Request, Response)
-		}{path, handler}
+func Router() router_ {
+	r := router_{
+		make(map[key]handler),
 	}
+	hand := func(req Request, res Response) {
+		res.SendData("Welcome to 404")
+	}
+	r.list[key{"GET", "/404"}] = hand
+	return r
 }
 
 func build_request(conn net.Conn) Request {
@@ -57,11 +56,32 @@ func build_request(conn net.Conn) Request {
 	return req
 }
 
-func start_router(conn net.Conn) {
-	//codigo chido aquis
+func mutltiplexor(r router_, req Request, res Response) {
+	pos_route := make(map[key]handler)
+
+	for m, hand := range r.list {
+		if m.method == req.Method && strings.EqualFold(m.path, req.Route) {
+			pos_route[m] = hand
+		}
+	}
+	fmt.Printf("%v", pos_route)
+	if len(pos_route) == 0 {
+		fmt.Println("Join in 404")
+		r.list[key{"GET", "/404"}](req, res)
+	} else if len(pos_route) == 1 {
+		fmt.Println("Join in single route")
+		r.list[key{req.Method, req.Route}](req, res)
+	} else {
+		//Multiple case for  params:id feature!!
+
+	}
+}
+
+func start_router(conn net.Conn, r router_) {
 	defer conn.Close()
 	req := build_request(conn)
-	respond(conn, req)
+	res := Response{make(map[string]string), conn}
+	mutltiplexor(r, req, res)
 }
 
 func split_request(conn net.Conn) ([]string, []string) {
@@ -92,7 +112,6 @@ func split_headers(hd []string) Request {
 	req := Request{}
 	req.Headers = make(map[string]string)
 	for i, h := range hd {
-		fmt.Println(h)
 		if i == 0 {
 			spl := strings.Split(h, " ")
 			req.Method = spl[0]
@@ -111,23 +130,29 @@ func split_headers(hd []string) Request {
 	return req
 }
 
-func respond(conn net.Conn, req Request) {
+func (r Response) SendData(data string) {
+	fmt.Fprint(r.connect, "HTTP/1.1 200 OK\r\n")
+	fmt.Fprintf(r.connect, "Content-Length: %d\r\n", len(data))
+	fmt.Fprint(r.connect, "Content-Type: text/html\r\n")
+	fmt.Fprint(r.connect, "\r\n")
+	fmt.Fprint(r.connect, data)
+}
+func (r Response) SendJson(data string) {
+	fmt.Fprint(r.connect, "HTTP/1.1 200 OK\r\n")
+	fmt.Fprintf(r.connect, "Content-Length: %d\r\n", len(data))
+	fmt.Fprint(r.connect, "Content-Type: application/json\r\n")
+	fmt.Fprint(r.connect, "\r\n")
+	fmt.Fprint(r.connect, data)
+}
+func (r Response) SendRender() {
 
-	body := `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><title></title></head><body><strong>` + req.Host + req.Route + `</strong> <br> <span>conection from:` + req.Headers["User-Agent"] + `</span></body></html>`
-
-	fmt.Fprint(conn, "HTTP/1.1 200 OK\r\n")
-	fmt.Fprintf(conn, "Content-Length: %d\r\n", len(body))
-	fmt.Fprint(conn, "Content-Type: text/html\r\n")
-	fmt.Fprint(conn, "\r\n")
-	fmt.Fprint(conn, body)
 }
 
-func Serve(port string, r Router) {
-	router = r
-	serve(port)
+func Serve(port string, r router_) {
+	serve(port, r)
 }
 
-func serve(port string) {
+func serve(port string, r router_) {
 	li, err := net.Listen("tcp", ":8080")
 	if err != nil {
 		log.Fatalln(err.Error())
@@ -140,6 +165,6 @@ func serve(port string) {
 			log.Fatalln(err.Error())
 			continue
 		}
-		go start_router(conn)
+		go start_router(conn, r)
 	}
 }
